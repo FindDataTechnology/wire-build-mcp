@@ -54,5 +54,16 @@
       ],
       "notes": "数据治理面：行读取返有效视图（含修正）；写修正三分支（insert/update/delete）必须带 source 来源标记（不代填——混有表单提交与对话改错两类数据时是事后区分的唯一依据）；撤销只置 reverted_at（基行永不改写，二次撤销由上游判 409 原文透传）；导出带 truncated 字段（true=被上游行数闸截断，不是全量）。不提供删数据集（不可逆且连带产物）。"
     }
-  ]
+  ],
+  "tool_risk": {
+    "wire_dataset_create": "write",
+    "wire_artifact_form_create": "write",
+    "wire_artifact_record_view_create": "write",
+    "wire_artifact_update": "write",
+    "wire_artifact_publish": "write",
+    "wire_artifact_archive": "write",
+    "wire_artifact_restore": "write",
+    "wire_dataset_correct": "write",
+    "wire_dataset_correction_revert": "write"
+  }
 }
