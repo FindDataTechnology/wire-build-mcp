@@ -140,8 +140,11 @@ def test_health_state_transitions():
     assert sr.report_state(False, configured=False) == "not_configured"
 
 
-def test_start_background_returns_none_when_unconfigured():
-    assert sr.start_background(FakeMCP(["t"])) is None
+async def test_ensure_started_unconfigured_seals():
+    mcp = FakeMCP(["t"])
+    sr.ensure_started(mcp)
+    assert mcp._wire_surface_task is False   # sealed: never retried
+    assert sr.start_background.__doc__ is not None
 
 
 async def test_start_background_marks_state_via_module(monkeypatch):

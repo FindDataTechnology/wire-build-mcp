@@ -37,7 +37,6 @@ def create_server(settings: Settings | None = None):
     mcp._wire_build_client = client
     mcp._wire_build_settings = settings
     mcp._wire_surface_report = "not_configured"
-    surface_report.start_background(mcp)
     return mcp
 
 
@@ -50,6 +49,7 @@ def build_app(settings: Settings | None = None):
 
     async def app(scope, receive, send):
         if scope.get("type") == "http":
+            surface_report.ensure_started(mcp)  # 首请求触发：loop 已在跑
             path = (scope.get("path") or "").rstrip("/")
             if path == "/health":
                 state = getattr(mcp, "_wire_surface_report", "not_configured")

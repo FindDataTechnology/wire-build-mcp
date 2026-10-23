@@ -141,3 +141,10 @@ def start_background(mcp) -> asyncio.Task | None:
             mcp._wire_surface_report = report_state(False, configured=True)
 
     return asyncio.create_task(_runner())
+
+
+def ensure_started(mcp) -> None:
+    """首请求触发点：此时事件循环已在跑；只触发一次；未配置置 False 封口。"""
+    if getattr(mcp, "_wire_surface_task", None) is not None:
+        return
+    mcp._wire_surface_task = start_background(mcp) or False
