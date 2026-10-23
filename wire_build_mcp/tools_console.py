@@ -17,16 +17,19 @@ get_http_headers 过滤 Authorization，家族坑）。上游权威鉴权，本�
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from fastmcp import FastMCP
 
 from .client import MISSING_CREDENTIAL_HINT, WireClient, WireError
 
-#: 产物 kind 短名 → 创建工具名（spec：form 与 record-view 两个创建工具）
+#: 产物 kind 短名 → 创建工具名（spec：form / record-view / dashboard / doc 四个创建工具）
 CREATE_TOOL_KINDS: dict[str, str] = {
     "wire_artifact_form_create": "form",
     "wire_artifact_record_view_create": "record-view",
+    "wire_artifact_dashboard_create": "dashboard",
+    "wire_artifact_doc_create": "doc",
 }
 
 #: 轻量存储层档位码（建集分流判据，与上游 FREE_PLAN_CODE 对表）
@@ -287,7 +290,18 @@ def register(mcp: FastMCP, client: WireClient) -> None:
 
     # ── 产物写（3，全落草稿）──────────────────────────────────────────────────
 
-    async def _create_with_spec(kind: str, title: str, spec: dict[str, Any]) -> Any:
+    def _source_ref(explicit: str | None) -> str | None:
+        """生产来源指针（wire-content-fleet D6）：显式入参优先，否则取部署期
+        注入的 ``WIRE_SOURCE_REF``（舰队/部署把部署与岗位写进环境，回合由调用
+        方在入参里补）。两者皆无 → None（人工/控制台路径，行为不变）。"""
+        if explicit and explicit.strip():
+            return explicit.strip()
+        env = os.environ.get("WIRE_SOURCE_REF")
+        return env.strip() if env and env.strip() else None
+
+    async def _create_with_spec(
+        kind: str, title: str, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
         """空白建档（v1 空 spec）→ PUT 完整 spec（v2）——全程 draft。
 
         上游客户面无「一步落完整 spec v1」的路径：POST /artifacts 只接受
@@ -298,17 +312,24 @@ def register(mcp: FastMCP, client: WireClient) -> None:
         bearer = _bearer_or_raise()
         if kind == "form":
             await _reject_unknown_form_columns(client, bearer=bearer, spec=spec)
+        src = _source_ref(source_ref)
+        create_body: dict[str, Any] = {"kind": kind, "title": title}
+        if src is not None:
+            create_body["source_ref"] = src
         artifact = await client.request(
             "POST", "/api/v1/artifacts", bearer=bearer,
-            json_body={"kind": kind, "title": title},
+            json_body=create_body,
         )
         artifact_id = artifact.get("id") if isinstance(artifact, dict) else None
         if artifact_id is None:
             raise WireError("unreachable", None, f"产物创建未返回 id：{artifact!r}")
         try:
+            update_body: dict[str, Any] = {"spec": spec}
+            if src is not None:
+                update_body["source_ref"] = src
             updated = await client.request(
                 "PUT", f"/api/v1/artifacts/{artifact_id}", bearer=bearer,
-                json_body={"spec": spec},
+                json_body=update_body,
             )
         except WireError as exc:
             try:
@@ -334,7 +355,9 @@ def register(mcp: FastMCP, client: WireClient) -> None:
         }
 
     @mcp.tool
-    async def wire_artifact_form_create(title: str, spec: dict[str, Any]) -> Any:
+    async def wire_artifact_form_create(
+        title: str, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
         """创建数据录入表单（kind=form）——接受完整 spec 信封，落 draft。
 
         spec 信封形状：``{"title": <同 title>, "spec": {"datasetId", "fields": [...],
@@ -346,10 +369,12 @@ def register(mcp: FastMCP, client: WireClient) -> None:
 
         本工具**只落草稿**：创建即 published 的参数不存在（传了会被 MCP 层拒）。
         """
-        return await _create_with_spec("form", title, spec)
+        return await _create_with_spec("form", title, spec, source_ref)
 
     @mcp.tool
-    async def wire_artifact_record_view_create(title: str, spec: dict[str, Any]) -> Any:
+    async def wire_artifact_record_view_create(
+        title: str, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
         """创建单记录扫码页（kind=record-view）——接受完整 spec 信封，落 draft。
 
         spec 信封形状：``{"title": <同 title>, "spec": {"datasetId", "keyColumn",
@@ -360,22 +385,70 @@ def register(mcp: FastMCP, client: WireClient) -> None:
 
         本工具**只落草稿**：发布请单独调 wire_artifact_publish。
         """
-        return await _create_with_spec("record-view", title, spec)
+        return await _create_with_spec("record-view", title, spec, source_ref)
 
     @mcp.tool
-    async def wire_artifact_update(artifact_id: int, spec: dict[str, Any]) -> Any:
+    async def wire_artifact_dashboard_create(
+        title: str, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
+        """创建看板（kind=dashboard）——接受完整 dashboard v1 spec 信封，落 draft。
+
+        spec 信封形状：``{"title": <同 title>, "spec": {"title", "panels": [
+        {"type": "kpi|line|bar|table", "title", "span"?, "source"?, "data":
+        {"columns", "rows"}, "query"?} ]}}``（结构见 fd-wire
+        artifacts/service.py::validate_kind_spec——dashboard 走通用层：
+        title 非空 + spec.spec 非空；面板级宽容校验在渲染侧）。面板引用的列名
+        先用 wire_dataset_schema 取事实，别编。
+
+        ``source_ref``：生产来源指针（部署/岗位/回合），缺省取环境
+        ``WIRE_SOURCE_REF``；人工调用留空即可。
+
+        本工具**只落草稿**：发布请单独调 wire_artifact_publish。
+        """
+        return await _create_with_spec("dashboard", title, spec, source_ref)
+
+    @mcp.tool
+    async def wire_artifact_doc_create(
+        title: str, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
+        """创建正文文档（kind=doc）——接受 markdown 正文信封，落 draft。
+
+        spec 信封形状：``{"title": <同 title>, "spec": {"format": "markdown",
+        "text": "<markdown 源文本>"}}``。``format`` 恒为 ``"markdown"``（v1 唯一
+        格式），正文上限 256 KB；存的是 markdown 源文本，不是预渲染 HTML。
+        校验见 fd-wire artifacts/doc_spec.py。
+
+        ``source_ref``：生产来源指针（部署/岗位/回合），缺省取环境
+        ``WIRE_SOURCE_REF``；人工调用留空即可。
+
+        本工具**只落草稿**：发布请单独调 wire_artifact_publish。
+        """
+        return await _create_with_spec("doc", title, spec, source_ref)
+
+    @mcp.tool
+    async def wire_artifact_update(
+        artifact_id: int, spec: dict[str, Any], source_ref: str | None = None
+    ) -> Any:
         """更新产物 spec（PUT /artifacts/{id}）——追加新版本行，状态仍为原态。
 
         archived 产物拒改（上游 409「请先恢复」原文透传——先 wire_artifact_restore）。
-        spec 校验按 kind 分派（form/record-view 的结构层 + 属主层）；
+        spec 校验按 kind 分派（form/record-view 的结构层 + 属主层；dashboard 走
+        通用层；doc 走正文契约层）；
         422 时若 spec 引用数据集，错误文案带该数据集真实列名清单。
+
+        ``source_ref``：生产来源指针（部署/岗位/回合），缺省取环境
+        ``WIRE_SOURCE_REF``；只记在本次新增的版本行上。
         """
         bearer = _bearer_or_raise()
         await _reject_unknown_form_columns(client, bearer=bearer, spec=spec)
+        body: dict[str, Any] = {"spec": spec}
+        src = _source_ref(source_ref)
+        if src is not None:
+            body["source_ref"] = src
         try:
             return await client.request(
                 "PUT", f"/api/v1/artifacts/{artifact_id}", bearer=bearer,
-                json_body={"spec": spec},
+                json_body=body,
             )
         except WireError as exc:
             if exc.status == 422:

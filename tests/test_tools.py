@@ -333,3 +333,118 @@ async def test_missing_credential_hints_and_never_touches_upstream(monkeypatch):
             await c.call_tool("wire_artifact_list", {})
     assert "wdk_" in str(ei.value)
     assert fake.calls == []
+
+
+# ── dashboard / doc 创建（wire-content-fleet 2.3 / 2.4）─────────────────────
+
+DASHBOARD_SPEC = {
+    "title": "宏观速览",
+    "spec": {"title": "宏观速览", "panels": [
+        {"type": "kpi", "title": "CPI 同比", "span": 3, "data": {"columns": ["期", "值"], "rows": []}},
+    ]},
+}
+
+DOC_SPEC = {"title": "周报", "spec": {"format": "markdown", "text": "# 周报\n\n正文"}}
+
+
+async def test_dashboard_create_lands_draft(bearer):
+    fake = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 21},
+        "PUT /api/v1/artifacts/21": {"id": 21, "status": "draft", "version": 2},
+    })
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        out = await c.call_tool("wire_artifact_dashboard_create", {
+            "title": "宏观速览", "spec": DASHBOARD_SPEC})
+    data = out.data if hasattr(out, "data") else out
+    assert data["artifact_id"] == 21 and data["kind"] == "dashboard"
+    assert fake.calls[0]["json_body"] == {"kind": "dashboard", "title": "宏观速览"}
+    assert fake.calls[1]["json_body"]["spec"] == DASHBOARD_SPEC
+
+
+async def test_dashboard_create_rejects_publish_switch(bearer):
+    """未声明参数由 MCP 层拒绝——不存在「创建即发布」这条路。"""
+    fake = FakeClient(by_path={"POST /api/v1/artifacts": {"id": 22}})
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        with pytest.raises(Exception, match="publish"):
+            await c.call_tool("wire_artifact_dashboard_create", {
+                "title": "x", "spec": DASHBOARD_SPEC, "publish": True})
+    assert fake.calls == []
+
+
+async def test_dashboard_create_compensates_on_rejection(bearer):
+    fake = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 23},
+        "PUT /api/v1/artifacts/23": WireError("invalid", 422, "spec.spec 不能为空"),
+    })
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        with pytest.raises(Exception) as ei:
+            await c.call_tool("wire_artifact_dashboard_create", {
+                "title": "x", "spec": {"title": "x"}})
+    assert "补偿归档" in str(ei.value) and "23" in str(ei.value)
+    assert any(call["path"] == "/api/v1/artifacts/23/archive" for call in fake.calls)
+
+
+async def test_doc_create_lands_draft(bearer):
+    fake = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 31},
+        "PUT /api/v1/artifacts/31": {"id": 31, "status": "draft", "version": 2},
+    })
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        out = await c.call_tool("wire_artifact_doc_create", {
+            "title": "周报", "spec": DOC_SPEC})
+    data = out.data if hasattr(out, "data") else out
+    assert data["artifact_id"] == 31 and data["kind"] == "doc"
+    assert fake.calls[0]["json_body"]["kind"] == "doc"
+    assert fake.calls[1]["json_body"]["spec"]["spec"]["format"] == "markdown"
+
+
+async def test_doc_create_rejects_non_markdown_and_compensates(bearer):
+    fake = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 32},
+        "PUT /api/v1/artifacts/32": WireError("invalid", 422, "format 必须为 markdown"),
+    })
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        with pytest.raises(Exception) as ei:
+            await c.call_tool("wire_artifact_doc_create", {
+                "title": "x", "spec": {"title": "x", "spec": {"format": "html", "text": "<p>x</p>"}}})
+    assert "markdown" in str(ei.value)
+    assert any(call["path"] == "/api/v1/artifacts/32/archive" for call in fake.calls)
+
+
+async def test_source_ref_from_env_and_explicit(bearer, monkeypatch):
+    """来源指针：显式入参优先，否则取 WIRE_SOURCE_REF；两者皆无则不带该键。"""
+    monkeypatch.setenv("WIRE_SOURCE_REF", "deploy=ops;post=patrol")
+    fake = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 41},
+        "PUT /api/v1/artifacts/41": {"id": 41, "status": "draft", "version": 2},
+    })
+    mcp = await _mk(fake)
+    async with Client(mcp) as c:
+        await c.call_tool("wire_artifact_doc_create", {"title": "周报", "spec": DOC_SPEC})
+    assert fake.calls[0]["json_body"]["source_ref"] == "deploy=ops;post=patrol"
+    assert fake.calls[1]["json_body"]["source_ref"] == "deploy=ops;post=patrol"
+
+    fake2 = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 42},
+        "PUT /api/v1/artifacts/42": {"id": 42, "status": "draft", "version": 2},
+    })
+    mcp2 = await _mk(fake2)
+    async with Client(mcp2) as c:
+        await c.call_tool("wire_artifact_doc_create", {
+            "title": "周报", "spec": DOC_SPEC, "source_ref": "turn=7"})
+    assert fake2.calls[0]["json_body"]["source_ref"] == "turn=7"
+
+    monkeypatch.delenv("WIRE_SOURCE_REF")
+    fake3 = FakeClient(by_path={
+        "POST /api/v1/artifacts": {"id": 43},
+        "PUT /api/v1/artifacts/43": {"id": 43, "status": "draft", "version": 2},
+    })
+    mcp3 = await _mk(fake3)
+    async with Client(mcp3) as c:
+        await c.call_tool("wire_artifact_doc_create", {"title": "周报", "spec": DOC_SPEC})
+    assert "source_ref" not in fake3.calls[0]["json_body"]
