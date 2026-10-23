@@ -32,3 +32,6 @@ line-length = 100
 
 [tool.setuptools.packages.find]
 include = ["wire_build_mcp*"]
+
+[tool.setuptools.package-data]
+wire_build_mcp = ["tool-surface.json"]
