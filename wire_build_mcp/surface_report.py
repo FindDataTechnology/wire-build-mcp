@@ -48,9 +48,19 @@ def _configured() -> tuple[str, str, str] | None:
 
 
 async def _tool_names(mcp) -> list[str]:
-    """运行时枚举：真源是注册进 FastMCP 的工具，不是 tool-surface.json。"""
-    tools = await mcp.get_tools()
-    return sorted(tools.keys())
+    """运行时枚举：真源是注册进 FastMCP 的工具，不是 tool-surface.json。
+
+    `fastmcp>=2.0` 的版本区间横跨两代枚举 API：4.x 只有
+    ``list_tools()``（Tool 对象/字典序列），更高版本另提供
+    ``get_tools()``（{name: tool} 映射）。按可用性分派——只认其中一个
+    API 会在另一代的镜像里 AttributeError（2026-10-24 生产实证：
+    启动自报因此一次都没发出去，fire-and-forget 边界吞成 failed）。
+    """
+    get_tools = getattr(mcp, "get_tools", None)
+    if get_tools is not None:
+        return sorted((await get_tools()).keys())
+    items = await mcp.list_tools()
+    return sorted(t["name"] if isinstance(t, dict) else t.name for t in items)
 
 
 def _surface_version() -> str | None:
