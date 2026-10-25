@@ -74,9 +74,9 @@ def _surface_version() -> str | None:
         from pathlib import Path
 
         here = Path(__file__).resolve().parent
-        for candidate in (here / "tool-surface.json", here.parent / "tool-surface.json"):
-            if candidate.is_file():
-                return hashlib.sha256(candidate.read_bytes()).hexdigest()[:12]
+        for cand in (here, *here.parents[:4]):
+            if (cand / "tool-surface.json").is_file():
+                return hashlib.sha256((cand / "tool-surface.json").read_bytes()).hexdigest()[:12]
     except Exception as exc:  # noqa: BLE001 — 版本标注是可选元数据
         logger.warning("surface_version unavailable: %s", exc)
     return None
