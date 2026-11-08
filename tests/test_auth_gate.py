@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from wire_build_mcp.auth_gate import AuthGate
+from wire_build_mcp.auth_gate import _CACHE_MAX, AuthGate
 
 
 async def test_anonymous_rejected():
@@ -11,3 +11,11 @@ async def test_anonymous_rejected():
 
 async def test_any_bearer_passes():
     assert await AuthGate().check("anything") is True
+
+
+async def test_cache_is_bounded():
+    # 每个不同 bearer 都会写一条缓存键：没有上界就是长跑进程的 RSS 泄漏面
+    gate = AuthGate()
+    for i in range(_CACHE_MAX * 4):
+        await gate.check(f"tok-{i}")
+    assert len(gate._cache) <= _CACHE_MAX
