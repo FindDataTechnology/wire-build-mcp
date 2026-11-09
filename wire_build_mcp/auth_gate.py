@@ -78,10 +78,24 @@ class AuthGateMiddleware:
         )
 
 
+#: Headers a bearer may arrive in. `authorization` is the standard one; the MCP
+#: gateway in front of us forwards the caller's token to the upstream server as
+#: `x-authorization` (mcpgw `_get_registry_headers`: "X-Authorization: Bearer
+#: <caller token>") and its own docstring advertises support for both. Reading
+#: only the standard header therefore rejected EVERY gateway call with
+#: `401 {"error": "Authentication required"}` while a direct request passed —
+#: live 2026-11-09: wire-build-mcp / wire-ops-mcp dark behind the gateway, 17
+#: packs declaring those tools.
+_BEARER_HEADERS = (b"authorization", b"x-authorization")
+
+
 def _bearer_from_scope(scope) -> str | None:
     for name, value in scope.get("headers", []):
-        if name == b"authorization":
-            text = value.decode("latin-1")
-            if text.lower().startswith("bearer "):
-                return text[7:].strip() or None
+        if name not in _BEARER_HEADERS:
+            continue
+        text = value.decode("latin-1")
+        if text.lower().startswith("bearer "):
+            token = text[7:].strip()
+            if token:
+                return token
     return None

@@ -19,3 +19,21 @@ async def test_cache_is_bounded():
     for i in range(_CACHE_MAX * 4):
         await gate.check(f"tok-{i}")
     assert len(gate._cache) <= _CACHE_MAX
+
+
+def test_gateway_header_is_accepted():
+    """The gateway forwards the caller's token as `x-authorization`; reading only
+    the standard header made every proxied call a 401 (live 2026-11-09)."""
+    from wire_build_mcp.auth_gate import _bearer_from_scope
+
+    scope = {"headers": [(b"x-authorization", b"Bearer caller-token")]}
+    assert _bearer_from_scope(scope) == "caller-token"
+
+
+def test_standard_header_still_wins_and_empty_values_are_ignored():
+    from wire_build_mcp.auth_gate import _bearer_from_scope
+
+    assert _bearer_from_scope({"headers": [(b"authorization", b"Bearer direct")]}) == "direct"
+    assert _bearer_from_scope({"headers": [(b"x-authorization", b"Bearer  ")]}) is None
+    assert _bearer_from_scope({"headers": [(b"x-authorization", b"Basic abc")]}) is None
+    assert _bearer_from_scope({"headers": []}) is None
