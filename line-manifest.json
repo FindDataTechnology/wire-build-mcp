@@ -5,8 +5,7 @@
   "identity": {
     "issuer": "https://auth.finddatatech.cloud/oidc",
     "jwks_uri": "https://auth.finddatatech.cloud/oidc/jwks",
-    "jit_policy": "off",
-    "note": "本仓只做**「有 Bearer 就放行」的传输门**，不解析、不验签（auth_gate.py:1-13 自述「上游权威」），并把这个 bearer 原样转发给柏讯客户面（client.py:26-55、tools_steward.py:57-216）。真实鉴权在 fd-wire：客户面要**用户级** Logto ID token（client.py:26 明确提示「壹座同租户登录后获取」）。无断言兑换端点，jit_policy=off。"
+    "jit_policy": "off"
   },
   "auth_tracks": [
     {
@@ -14,8 +13,7 @@
       "accepts": "ciyuan-sk",
       "fallback": false,
       "enforced": false,
-      "migration_task": "converge-line-identity-and-keys#8.3",
-      "note": "未接：本仓不解析入站凭据；词元钥匙会被原样转发到 fd-wire，由上游决定认不认。"
+      "migration_task": "converge-line-identity-and-keys#8.3"
     }
   ],
   "scopes": [
@@ -23,13 +21,11 @@
     "line:write"
   ],
   "billing": {
-    "plane": "ciyuan",
-    "note": "本仓零计费代码（grep `sub2api` 无命中）：按调用扣费发生在网关/registry 的词元平面，不在本线代码里。上游 402 会被映射成 `billing` 错误（client.py:94），说明钱在 fd-wire/词元平面判。"
+    "plane": "ciyuan"
   },
   "surfaces": {
     "mcp": true,
     "account": false,
     "admin": false
-  },
-  "note": "柏讯产物构建与数据治理面：form/record-view/dashboard/doc 的创建·更新·发布 + 产物版本读取 + 数据集列事实 + 按需建集 + 表单数据管理。**无回退轨是真实缺口**：本面每个动作都要求用户级身份（产物归属某个客户/成员），线自有的 `wdk-` 数据面钥匙只覆盖只读数据且不承载成员身份，不能当回退。修法=给柏讯客户面加线自有 PAT（承载 owner 归属），或让 `wdk-` 键能承载 owner。"
+  }
 }
