@@ -1,5 +1,7 @@
 # wire-build-mcp — 柏讯产物构建 MCP
 
+> **Part of the [Wire line (寻数·柏讯)](https://www.finddatatech.cloud/products/wire) of [FindData](https://www.finddatatech.cloud)** — artifact build surface: create and publish data-entry forms and record views from specs, with draft-first write discipline.
+
 柏讯（wire 线）的**产物构建面** MCP：让 AI agent 能按 spec 创建/更新/发布数据录入
 表单（form）与单记录扫码页（record-view），并取数据集列事实、按需建集。**草稿优先的
 写入纪律**：创建/更新一律落 draft，发布必须显式单独调用。
